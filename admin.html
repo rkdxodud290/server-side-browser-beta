@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>.capitalize { text-transform: capitalize; }</style>
+</head>
+<body class="bg-gray-100">
+    <div class="container mx-auto p-4 md:p-8">
+        <div class="flex justify-between items-center mb-6">
+            <h1 class="text-3xl font-bold text-gray-800">User Management</h1>
+            <a href="index.php" class="text-blue-500 hover:text-blue-700">&larr; Back to App</a>
+        </div>
+
+        <div class="bg-white rounded-lg shadow-md p-6">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                <input type="text" id="search-input" placeholder="Search by email..." class="md:col-span-2 p-2 border border-gray-300 rounded-lg">
+                <select id="status-filter" class="p-2 border border-gray-300 rounded-lg">
+                    <option value="all">All Users</option>
+                    <option value="pending_approval">Pending Approval</option>
+                    <option value="pending_upgrade">Pending Upgrade</option>
+                    <option value="free_user">Free Users</option>
+                    <option value="paid_user">Paid Users</option>
+                    <option value="admin">Admins</option>
+                    <option value="banned">Banned</option>
+                </select>
+            </div>
+
+            <div id="users-table-container" class="overflow-x-auto">
+                </div>
+            
+            <div id="pagination-controls" class="flex justify-between items-center mt-4">
+                </div>
+        </div>
+    </div>
+
+    <script>
+        const searchInput = document.getElementById('search-input');
+        const statusFilter = document.getElementById('status-filter');
+        let currentPage = 1;
+        let searchTimeout;
+
+        async function fetchUsers() {
+            const search = searchInput.value;
+            const status = statusFilter.value;
+            const container = document.getElementById('users-table-container');
+            container.innerHTML = '<p>Loading users...</p>';
+
+            try {
+                const response = await fetch(`auth/admin_actions.php?action=get_users&page=${currentPage}&status=${status}&search=${search}`);
+                const data = await response.json();
+                
+                if (data.error) {
+                    container.innerHTML = `<p class="text-red-500">${data.error}</p>`;
+                    return;
+                }
+                renderTable(data.users);
+                renderPagination(data.pagination);
+            } catch (err) {
+                container.innerHTML = `<p class="text-red-500">Failed to fetch data.</p>`;
+            }
+        }
+
+        function renderTable(users) {
+            const container = document.getElementById('users-table-container');
+            if (users.length === 0) {
+                container.innerHTML = '<p>No users found matching your criteria.</p>';
+                return;
+            }
+
+            const tableRows = users.map(user => `
+                <tr class="border-b hover:bg-gray-50" id="user-row-${user.id}">
+                    <td class="p-3">${user.email}</td>
+                    <td class="p-3"><span class="px-2 py-1 text-xs font-semibold rounded-full capitalize ${getBadgeClass(user.account_level)}">${user.account_level.replace(/_/g, ' ')}</span></td>
+                    <td class="p-3 text-sm text-gray-600">${new Date(user.reg_date).toLocaleDateString()}</td>
+                    <td class="p-3 text-sm text-gray-600">${user.last_login ? new Date(user.last_login).toLocaleString() : 'Never'}</td>
+                    <td class="p-3">
+                        <select onchange="updateUserLevel(this, ${user.id})" class="p-1 border border-gray-300 rounded-md">
+                            <option value="" disabled selected>Change role...</option>
+                            <option value="free_user">Free User</option>
+                            <option value="paid_user">Paid User</option>
+                            <option value="admin">Admin</option>
+                            <option value="banned">Banned</option>
+                        </select>
+                    </td>
+                </tr>
+            `).join('');
+
+            container.innerHTML = `
+                <table class="min-w-full bg-white">
+                    <thead class="bg-gray-200">
+                        <tr>
+                            <th class="p-3 text-left">User</th>
+                            <th class="p-3 text-left">Level</th>
+                            <th class="p-3 text-left">Registered</th>
+                            <th class="p-3 text-left">Last Login</th>
+                            <th class="p-3 text-left">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>${tableRows}</tbody>
+                </table>
+            `;
+        }
+
+        function renderPagination(pagination) {
+            const controls = document.getElementById('pagination-controls');
+            let buttons = '';
+            for (let i = 1; i <= pagination.totalPages; i++) {
+                buttons += `<button onclick="changePage(${i})" class="px-3 py-1 mx-1 rounded-md ${i === pagination.currentPage ? 'bg-blue-500 text-white' : 'bg-gray-200'}">${i}</button>`;
+            }
+            controls.innerHTML = `
+                <span class="text-sm text-gray-700">Page ${pagination.currentPage} of ${pagination.totalPages} (${pagination.totalUsers} users)</span>
+                <div>${buttons}</div>
+            `;
+        }
+        
+        function getBadgeClass(level) {
+            switch(level) {
+                case 'admin': return 'bg-purple-200 text-purple-800';
+                case 'paid_user': return 'bg-green-200 text-green-800';
+                case 'pending_approval':
+                case 'pending_upgrade': return 'bg-yellow-200 text-yellow-800';
+                case 'banned': return 'bg-red-200 text-red-800';
+                default: return 'bg-gray-200 text-gray-800';
+            }
+        }
+
+        function changePage(page) { currentPage = page; fetchUsers(); }
+
+        async function updateUserLevel(selectElement, userId) {
+            const newLevel = selectElement.value;
+            if (!newLevel || !confirm(`Are you sure you want to change this user to ${newLevel}?`)) {
+                selectElement.value = ""; return;
+            }
+            const formData = new FormData();
+            formData.append('user_id', userId);
+            formData.append('new_level', newLevel);
+            try {
+                const response = await fetch('auth/admin_actions.php?action=update_level', { method: 'POST', body: formData });
+                const result = await response.json();
+                if (result.success) { alert('User level updated successfully!'); fetchUsers(); } 
+                else { alert('Error: ' + result.error); }
+            } catch (err) { alert('An error occurred.');
+            } finally { selectElement.value = ""; }
+        }
+
+        document.addEventListener('DOMContentLoaded', fetchUsers);
+        statusFilter.addEventListener('change', () => { currentPage = 1; fetchUsers(); });
+        searchInput.addEventListener('keyup', () => { clearTimeout(searchTimeout); searchTimeout = setTimeout(() => { currentPage = 1; fetchUsers(); }, 500); });
+    </script>
+</body>
+</html>
